@@ -1,0 +1,6 @@
+# Visual Studio ayarlarý
+.vs/
+
+# Derleme klasörleri
+bin/
+obj/
