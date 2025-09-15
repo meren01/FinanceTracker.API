@@ -8,6 +8,19 @@ using FinanceTracker.API.Services;
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
 
+// CORS Policy - Daha esnek bir yapýlandýrma
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy
+            .SetIsOriginAllowed(origin => true) // Development için. Production'da spesifik origin'leri belirtin
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials();
+    });
+});
+
 // Controller ve Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -28,35 +41,40 @@ builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-}).AddJwtBearer(options =>
+})
+.AddJwtBearer(options =>
 {
-    options.RequireHttpsMetadata = false; // Dev ortamýnda true olursa sorun çýkabilir
+    options.RequireHttpsMetadata = false;
     options.SaveToken = true;
     options.TokenValidationParameters = new TokenValidationParameters
     {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(key),
         ValidateIssuer = true,
         ValidateAudience = true,
         ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
         ValidIssuer = jwtSection.GetValue<string>("Issuer"),
-        ValidAudience = jwtSection.GetValue<string>("Audience"),
-        IssuerSigningKey = new SymmetricSecurityKey(key)
+        ValidAudience = jwtSection.GetValue<string>("Audience")
+    };
+    
+    // JWT Bearer için CORS ayarlarý
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            if (context.Request.Method == "OPTIONS")
+            {
+                context.NoResult();
+            }
+            return Task.CompletedTask;
+        }
     };
 });
 
 // Authorization
-builder.Services.AddAuthorization();
-
-// CORS Policy
-builder.Services.AddCors(options =>
+builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("AllowReactApp", policy =>
-    {
-        policy.WithOrigins("http://localhost:5173", "https://localhost:5173") // React URL'leri
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .AllowCredentials();
-    });
+    options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
 });
 
 var app = builder.Build();
@@ -68,13 +86,18 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// Middleware sýralamasý çok önemli
+// CORS middleware'i en baþta olmalý
+app.UseCors();
+
+// HTTPS yönlendirmesi
 app.UseHttpsRedirection();
 
-app.UseCors("AllowReactApp"); // CORS burada olmalý
-
+// Authentication ve Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Controller routing
 app.MapControllers();
 
 app.Run();

@@ -1,5 +1,6 @@
 ﻿namespace FinanceTracker.API.DTOs
 {
+
     public class DashboardSummaryDto
     {
         public decimal TotalIncome { get; set; }

@@ -1,4 +1,5 @@
 ﻿using FinanceTracker.API.DTOs;
+using FinanceTracker.API.Models;
 using FinanceTracker.API.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,19 +16,32 @@ namespace FinanceTracker.API.Controllers
             _authService = authService;
         }
 
+        // ---------------- Register ----------------
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterDto dto)
         {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
             var (success, error) = await _authService.RegisterAsync(dto);
-            if (!success) return BadRequest(new { message = error });
-            return Ok(new { message = "Registration successful." });
+            if (!success)
+                return BadRequest(new { message = error });
+
+            return Ok(new { message = "User registered successfully" });
         }
 
+        // ---------------- Login ----------------
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginDto dto)
         {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
             var (success, token, error) = await _authService.LoginAsync(dto);
-            if (!success) return Unauthorized(new { message = error });
+
+            if (!success)
+                return Unauthorized(new { message = error });
+
             return Ok(new { token });
         }
     }

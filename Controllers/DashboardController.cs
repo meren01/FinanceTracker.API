@@ -25,27 +25,53 @@ namespace FinanceTracker.API.Controllers
             ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
             ?? "0");
 
+        // Toplam gelir, gider, bakiye
         [HttpGet("summary")]
         public async Task<ActionResult<DashboardSummaryDto>> GetSummary()
         {
             var userId = GetUserId();
-
             var transactions = await _db.Transactions
                 .Where(t => t.UserId == userId)
                 .ToListAsync();
 
             var totalIncome = transactions.Where(t => t.IsIncome).Sum(t => t.Amount);
             var totalExpense = transactions.Where(t => !t.IsIncome).Sum(t => t.Amount);
-            var balance = totalIncome - totalExpense;
 
-            var summary = new DashboardSummaryDto
+            return Ok(new DashboardSummaryDto
             {
                 TotalIncome = totalIncome,
                 TotalExpense = totalExpense,
-                Balance = balance
-            };
+                Balance = totalIncome - totalExpense
+            });
+        }
 
-            return Ok(summary);
+        // Kategori bazlı gelir/gider
+        [HttpGet("category-summary")]
+        public async Task<ActionResult<DashboardCategorySummaryDto>> GetCategorySummary()
+        {
+            var userId = GetUserId();
+            var transactions = await _db.Transactions
+                .Where(t => t.UserId == userId)
+                .Include(t => t.Category)
+                .ToListAsync();
+
+            var incomeSummary = transactions
+                .Where(t => t.IsIncome)
+                .GroupBy(t => t.Category?.Name ?? "Bilinmeyen")
+                .Select(g => new CategoryTotalDto { CategoryName = g.Key, Total = g.Sum(t => t.Amount) })
+                .ToList();
+
+            var expenseSummary = transactions
+                .Where(t => !t.IsIncome)
+                .GroupBy(t => t.Category?.Name ?? "Bilinmeyen")
+                .Select(g => new CategoryTotalDto { CategoryName = g.Key, Total = g.Sum(t => t.Amount) })
+                .ToList();
+
+            return Ok(new DashboardCategorySummaryDto
+            {
+                Income = incomeSummary,
+                Expense = expenseSummary
+            });
         }
     }
 }

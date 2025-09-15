@@ -22,61 +22,97 @@ namespace FinanceTracker.API.Services
 
         public async Task<(bool Success, string? Error)> RegisterAsync(RegisterDto dto)
         {
-            // Already exists?
-            if (await _db.Users.AnyAsync(u => u.Email.ToLower() == dto.Email.ToLower()))
-                return (false, "Email already registered.");
-
-            var user = new User
+            try
             {
-                Username = dto.Username,
-                Email = dto.Email,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password)
-            };
+                if (dto == null || string.IsNullOrEmpty(dto.Email) || string.IsNullOrEmpty(dto.Password))
+                    return (false, "Invalid registration data.");
 
-            _db.Users.Add(user);
-            await _db.SaveChangesAsync();
+                // Already exists?
+                if (await _db.Users.AnyAsync(u => u.Email.ToLower() == dto.Email.ToLower()))
+                    return (false, "Email already registered.");
 
-            return (true, null);
+                var user = new User
+                {
+                    Username = dto.Username,
+                    Email = dto.Email,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password)
+                };
+
+                _db.Users.Add(user);
+                await _db.SaveChangesAsync();
+
+                return (true, null);
+            }
+            catch (Exception ex)
+            {
+                return (false, $"Internal error: {ex.Message}");
+            }
         }
 
         public async Task<(bool Success, string? Token, string? Error)> LoginAsync(LoginDto dto)
         {
-            var user = await _db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == dto.Email.ToLower());
-            if (user == null) return (false, null, "Invalid credentials.");
+            try
+            {
+                if (dto == null || string.IsNullOrEmpty(dto.Email) || string.IsNullOrEmpty(dto.Password))
+                    return (false, null, "Invalid login data.");
 
-            var verified = BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash);
-            if (!verified) return (false, null, "Invalid credentials.");
+                var user = await _db.Users.FirstOrDefaultAsync(u => u.Email.ToLower() == dto.Email.ToLower());
+                if (user == null) return (false, null, "Invalid credentials.");
 
-            var token = GenerateToken(user);
+                var verified = BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash);
+                if (!verified) return (false, null, "Invalid credentials.");
 
-            return (true, token, null);
+                var token = GenerateToken(user);
+                return (true, token, null);
+            }
+            catch (Exception ex)
+            {
+                return (false, null, $"Internal error: {ex.Message}");
+            }
         }
 
         private string GenerateToken(User user)
         {
-            var jwtSection = _config.GetSection("Jwt");
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSection.GetValue<string>("Key")));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
-
-            var claims = new List<Claim>
+            try
             {
-                new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
-                new Claim(ClaimTypes.Name, user.Username),
-                new Claim(ClaimTypes.Email, user.Email),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-            };
+                var jwtSection = _config.GetSection("Jwt");
 
-            var expires = DateTime.UtcNow.AddMinutes(jwtSection.GetValue<int>("ExpireMinutes"));
+                var keyString = jwtSection.GetValue<string>("Key");
+                var issuer = jwtSection.GetValue<string>("Issuer");
+                var audience = jwtSection.GetValue<string>("Audience");
+                var expireMinutes = jwtSection.GetValue<int?>("ExpireMinutes") ?? 60;
 
-            var token = new JwtSecurityToken(
-                issuer: jwtSection.GetValue<string>("Issuer"),
-                audience: jwtSection.GetValue<string>("Audience"),
-                claims: claims,
-                expires: expires,
-                signingCredentials: creds
-            );
+                if (string.IsNullOrEmpty(keyString) || string.IsNullOrEmpty(issuer) || string.IsNullOrEmpty(audience))
+                    throw new Exception("JWT configuration is invalid.");
 
-            return new JwtSecurityTokenHandler().WriteToken(token);
+                var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(keyString));
+                var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+                var claims = new List<Claim>
+                {
+                    new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+                    new Claim(ClaimTypes.Name, user.Username),
+                    new Claim(ClaimTypes.Email, user.Email),
+                    new Claim(ClaimTypes.Role, user.Role), // Rol bilgisini ekliyoruz
+                    new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                };
+
+                var expires = DateTime.UtcNow.AddMinutes(expireMinutes);
+
+                var token = new JwtSecurityToken(
+                    issuer: issuer,
+                    audience: audience,
+                    claims: claims,
+                    expires: expires,
+                    signingCredentials: creds
+                );
+
+                return new JwtSecurityTokenHandler().WriteToken(token);
+            }
+            catch (Exception ex)
+            {
+                throw new Exception($"Token generation failed: {ex.Message}");
+            }
         }
     }
 }

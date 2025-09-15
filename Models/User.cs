@@ -19,6 +19,10 @@ namespace FinanceTracker.API.Models
         [Required]
         public string PasswordHash { get; set; } = null!;
 
+        [Required]
+        [MaxLength(50)]
+        public string Role { get; set; } = "User";
+
         public ICollection<Category>? Categories { get; set; }
         public ICollection<Transaction>? Transactions { get; set; }
     }
