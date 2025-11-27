@@ -11,7 +11,7 @@ namespace FinanceTracker.API.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    [Authorize] // Bu controller’a yalnızca login olmuş kullanıcılar erişebilir
+    [Authorize]
     public class TransactionsController : ControllerBase
     {
         private readonly AppDbContext _db;
@@ -21,36 +21,77 @@ namespace FinanceTracker.API.Controllers
             _db = db;
         }
 
-        // JWT’den kullanıcı ID’sini alma
         private int GetUserId() =>
             int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)
             ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
             ?? "0");
 
-        // GET: api/transactions -> Tüm işlemleri getir
+        // ✅ Filtreleme + Pagination
         [HttpGet]
-        public async Task<IActionResult> GetAll()
+        public async Task<IActionResult> GetAll(
+            [FromQuery] string period = "3m",
+            [FromQuery] int? categoryId = null,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10)
         {
             var userId = GetUserId();
-            var trans = await _db.Transactions
+
+            // Kullanıcıya ait işlemler
+            var query = _db.Transactions
                 .Where(t => t.UserId == userId)
-                .Include(t => t.Category) // Kategori bilgilerini de al
+                .Include(t => t.Category)
+                .AsQueryable();
+
+            // 🔹 Tarih filtreleme (Yerel zaman kullan)
+            DateTime now = DateTime.Now;
+            DateTime startDate = period switch
+            {
+                "1m" => now.AddMonths(-1),
+                "3m" => now.AddMonths(-3),
+                "6m" => now.AddMonths(-6),
+                "9m" => now.AddMonths(-9),
+                "12m" => now.AddMonths(-12),
+                _ => DateTime.MinValue
+            };
+
+            query = query.Where(t => t.Date >= startDate);
+
+            // 🔹 Kategori filtreleme
+            if (categoryId.HasValue)
+            {
+                query = query.Where(t => t.CategoryId == categoryId.Value);
+            }
+
+            // 🔹 Toplam kayıt sayısı
+            var totalRecords = await query.CountAsync();
+
+            // 🔹 Sayfalama ve sıralama
+            var transactions = await query
                 .OrderByDescending(t => t.Date)
-                .Select(t => new {
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .Select(t => new
+                {
                     t.Id,
                     t.Amount,
                     t.IsIncome,
                     t.Note,
-                    t.Date,
+                    Date = t.Date.ToLocalTime(),
                     CategoryId = t.CategoryId,
                     CategoryName = t.Category.Name
                 })
                 .ToListAsync();
 
-            return Ok(trans);
+            return Ok(new
+            {
+                totalRecords,
+                page,
+                pageSize,
+                transactions
+            });
         }
 
-        // POST: api/transactions -> Yeni işlem ekle
+        // ✅ Yeni işlem ekleme
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] TransactionDto dto)
         {
@@ -58,16 +99,16 @@ namespace FinanceTracker.API.Controllers
             {
                 var userId = GetUserId();
 
-                // Kategorinin kullanıcıya ait olup olmadığını kontrol et
                 var category = await _db.Categories.FirstOrDefaultAsync(c => c.Id == dto.CategoryId && c.UserId == userId);
-                if (category == null) return BadRequest(new { message = "Kategori bulunamadı veya kullanıcıya ait değil." });
+                if (category == null)
+                    return BadRequest(new { message = "Kategori bulunamadı veya kullanıcıya ait değil." });
 
                 var t = new Transaction
                 {
                     Amount = dto.Amount,
                     IsIncome = dto.IsIncome,
                     Note = dto.Note,
-                    Date = dto.Date,
+                    Date = dto.Date.ToLocalTime(),
                     CategoryId = dto.CategoryId,
                     UserId = userId
                 };
@@ -75,27 +116,25 @@ namespace FinanceTracker.API.Controllers
                 _db.Transactions.Add(t);
                 await _db.SaveChangesAsync();
 
-                // Ekleme sonrası geri dönecek veri
                 return Ok(new
                 {
                     t.Id,
                     t.Amount,
                     t.IsIncome,
                     t.Note,
-                    t.Date,
+                    Date = t.Date.ToLocalTime(),
                     CategoryId = t.CategoryId,
                     CategoryName = category.Name
                 });
             }
             catch (Exception ex)
             {
-                // Hata loglama
                 Console.WriteLine(ex);
                 return StatusCode(500, new { message = "Sunucu hatası" });
             }
         }
 
-        // PUT: api/transactions/5 -> İşlem güncelle
+        // ✅ İşlem güncelleme
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, [FromBody] TransactionDto dto)
         {
@@ -111,7 +150,7 @@ namespace FinanceTracker.API.Controllers
                 t.Amount = dto.Amount;
                 t.IsIncome = dto.IsIncome;
                 t.Note = dto.Note;
-                t.Date = dto.Date;
+                t.Date = dto.Date.ToLocalTime();
                 t.CategoryId = dto.CategoryId;
 
                 await _db.SaveChangesAsync();
@@ -122,7 +161,7 @@ namespace FinanceTracker.API.Controllers
                     t.Amount,
                     t.IsIncome,
                     t.Note,
-                    t.Date,
+                    Date = t.Date.ToLocalTime(),
                     CategoryId = t.CategoryId,
                     CategoryName = category.Name
                 });
@@ -134,7 +173,7 @@ namespace FinanceTracker.API.Controllers
             }
         }
 
-        // DELETE: api/transactions/5 -> İşlem sil
+        // ✅ İşlem silme
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
