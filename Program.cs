@@ -8,20 +8,20 @@ using FinanceTracker.API.Services;
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
 
-// CORS Policy - Daha esnek bir yapýlandýrma
+// CORS Policy
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
         policy
-            .SetIsOriginAllowed(origin => true) // Development için. Production'da spesifik origin'leri belirtin
+            .SetIsOriginAllowed(origin => true) // Development için serbest
             .AllowAnyMethod()
             .AllowAnyHeader()
             .AllowCredentials();
     });
 });
 
-// Controller ve Swagger
+// Controller & Swagger
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -32,6 +32,9 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 
 // AuthService
 builder.Services.AddScoped<IAuthService, AuthService>();
+
+// ?? Döviz kuru servisi
+builder.Services.AddHttpClient<ICurrencyService, CurrencyService>();
 
 // JWT Authentication
 var jwtSection = configuration.GetSection("Jwt");
@@ -56,16 +59,14 @@ builder.Services.AddAuthentication(options =>
         ValidIssuer = jwtSection.GetValue<string>("Issuer"),
         ValidAudience = jwtSection.GetValue<string>("Audience")
     };
-    
-    // JWT Bearer için CORS ayarlarý
+
     options.Events = new JwtBearerEvents
     {
         OnMessageReceived = context =>
         {
             if (context.Request.Method == "OPTIONS")
-            {
                 context.NoResult();
-            }
+
             return Task.CompletedTask;
         }
     };
@@ -79,25 +80,24 @@ builder.Services.AddAuthorization(options =>
 
 var app = builder.Build();
 
-// Middleware pipeline
+// Dev ortamý Swagger
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
-// Middleware sýralamasý çok önemli
-// CORS middleware'i en baþta olmalý
+// CORS
 app.UseCors();
 
-// HTTPS yönlendirmesi
+// HTTPS redirect
 app.UseHttpsRedirection();
 
-// Authentication ve Authorization
+// Auth / Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Controller routing
+// Controllers
 app.MapControllers();
 
 app.Run();

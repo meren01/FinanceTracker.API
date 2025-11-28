@@ -1,6 +1,7 @@
 ﻿using FinanceTracker.API.Data;
 using FinanceTracker.API.DTOs;
 using FinanceTracker.API.Models;
+using FinanceTracker.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,10 +16,12 @@ namespace FinanceTracker.API.Controllers
     public class TransactionsController : ControllerBase
     {
         private readonly AppDbContext _db;
+        private readonly ICurrencyService _currencyService;
 
-        public TransactionsController(AppDbContext db)
+        public TransactionsController(AppDbContext db, ICurrencyService currencyService)
         {
             _db = db;
+            _currencyService = currencyService;
         }
 
         private int GetUserId() =>
@@ -26,7 +29,9 @@ namespace FinanceTracker.API.Controllers
             ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
             ?? "0");
 
-        // ✅ Filtreleme + Pagination
+        // ======================================================================
+        //                               GET ALL
+        // ======================================================================
         [HttpGet]
         public async Task<IActionResult> GetAll(
             [FromQuery] string period = "3m",
@@ -36,13 +41,11 @@ namespace FinanceTracker.API.Controllers
         {
             var userId = GetUserId();
 
-            // Kullanıcıya ait işlemler
             var query = _db.Transactions
                 .Where(t => t.UserId == userId)
                 .Include(t => t.Category)
                 .AsQueryable();
 
-            // 🔹 Tarih filtreleme (Yerel zaman kullan)
             DateTime now = DateTime.Now;
             DateTime startDate = period switch
             {
@@ -56,16 +59,11 @@ namespace FinanceTracker.API.Controllers
 
             query = query.Where(t => t.Date >= startDate);
 
-            // 🔹 Kategori filtreleme
             if (categoryId.HasValue)
-            {
                 query = query.Where(t => t.CategoryId == categoryId.Value);
-            }
 
-            // 🔹 Toplam kayıt sayısı
             var totalRecords = await query.CountAsync();
 
-            // 🔹 Sayfalama ve sıralama
             var transactions = await query
                 .OrderByDescending(t => t.Date)
                 .Skip((page - 1) * pageSize)
@@ -74,6 +72,8 @@ namespace FinanceTracker.API.Controllers
                 {
                     t.Id,
                     t.Amount,
+                    t.Currency,
+                    t.AmountInTRY,
                     t.IsIncome,
                     t.Note,
                     Date = t.Date.ToLocalTime(),
@@ -91,7 +91,9 @@ namespace FinanceTracker.API.Controllers
             });
         }
 
-        // ✅ Yeni işlem ekleme
+        // ======================================================================
+        //                                 CREATE
+        // ======================================================================
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] TransactionDto dto)
         {
@@ -99,13 +101,23 @@ namespace FinanceTracker.API.Controllers
             {
                 var userId = GetUserId();
 
-                var category = await _db.Categories.FirstOrDefaultAsync(c => c.Id == dto.CategoryId && c.UserId == userId);
+                var category = await _db.Categories
+                    .FirstOrDefaultAsync(c => c.Id == dto.CategoryId && c.UserId == userId);
+
                 if (category == null)
                     return BadRequest(new { message = "Kategori bulunamadı veya kullanıcıya ait değil." });
+
+                decimal rate = 1;
+                if (dto.Currency != "TRY")
+                    rate = await _currencyService.GetRateAsync(dto.Currency, "TRY");
+
+                decimal amountTL = dto.Amount * rate;
 
                 var t = new Transaction
                 {
                     Amount = dto.Amount,
+                    Currency = dto.Currency,
+                    AmountInTRY = amountTL,
                     IsIncome = dto.IsIncome,
                     Note = dto.Note,
                     Date = dto.Date.ToLocalTime(),
@@ -120,6 +132,8 @@ namespace FinanceTracker.API.Controllers
                 {
                     t.Id,
                     t.Amount,
+                    t.Currency,
+                    t.AmountInTRY,
                     t.IsIncome,
                     t.Note,
                     Date = t.Date.ToLocalTime(),
@@ -134,20 +148,36 @@ namespace FinanceTracker.API.Controllers
             }
         }
 
-        // ✅ İşlem güncelleme
+        // ======================================================================
+        //                                 UPDATE
+        // ======================================================================
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, [FromBody] TransactionDto dto)
         {
             try
             {
                 var userId = GetUserId();
-                var t = await _db.Transactions.FirstOrDefaultAsync(tr => tr.Id == id && tr.UserId == userId);
+
+                var t = await _db.Transactions
+                    .FirstOrDefaultAsync(tr => tr.Id == id && tr.UserId == userId);
+
                 if (t == null) return NotFound();
 
-                var category = await _db.Categories.FirstOrDefaultAsync(c => c.Id == dto.CategoryId && c.UserId == userId);
-                if (category == null) return BadRequest(new { message = "Kategori bulunamadı veya kullanıcıya ait değil." });
+                var category = await _db.Categories
+                    .FirstOrDefaultAsync(c => c.Id == dto.CategoryId && c.UserId == userId);
+
+                if (category == null)
+                    return BadRequest(new { message = "Kategori bulunamadı veya kullanıcıya ait değil." });
+
+                decimal rate = 1;
+                if (dto.Currency != "TRY")
+                    rate = await _currencyService.GetRateAsync(dto.Currency, "TRY");
+
+                decimal amountTL = dto.Amount * rate;
 
                 t.Amount = dto.Amount;
+                t.Currency = dto.Currency;
+                t.AmountInTRY = amountTL;
                 t.IsIncome = dto.IsIncome;
                 t.Note = dto.Note;
                 t.Date = dto.Date.ToLocalTime();
@@ -159,6 +189,8 @@ namespace FinanceTracker.API.Controllers
                 {
                     t.Id,
                     t.Amount,
+                    t.Currency,
+                    t.AmountInTRY,
                     t.IsIncome,
                     t.Note,
                     Date = t.Date.ToLocalTime(),
@@ -173,25 +205,53 @@ namespace FinanceTracker.API.Controllers
             }
         }
 
-        // ✅ İşlem silme
+        // ======================================================================
+        //                                 DELETE
+        // ======================================================================
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
             try
             {
                 var userId = GetUserId();
-                var t = await _db.Transactions.FirstOrDefaultAsync(tr => tr.Id == id && tr.UserId == userId);
-                if (t == null) return NotFound();
+
+                var t = await _db.Transactions
+                    .FirstOrDefaultAsync(tr => tr.Id == id && tr.UserId == userId);
+
+                if (t == null)
+                    return NotFound(new { message = "Silinecek işlem bulunamadı." });
 
                 _db.Transactions.Remove(t);
                 await _db.SaveChangesAsync();
 
-                return Ok(new { message = "İşlem silindi" });
+                return Ok(new { message = "İşlem başarıyla silindi." });
             }
             catch (Exception ex)
             {
                 Console.WriteLine(ex);
                 return StatusCode(500, new { message = "Sunucu hatası" });
+            }
+        }
+
+
+        // ======================================================================
+        //                        💥 DÖVİZ TEST ENDPOINTİ
+        // ======================================================================
+        [HttpGet("test")]
+        [AllowAnonymous]
+        public async Task<IActionResult> Test()
+        {
+            try
+            {
+                var usd = await _currencyService.GetRateAsync("USD", "TRY");
+                var eur = await _currencyService.GetRateAsync("EUR", "TRY");
+                var gbp = await _currencyService.GetRateAsync("GBP", "TRY");
+
+                return Ok(new { USD = usd, EUR = eur, GBP = gbp });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message });
             }
         }
     }

@@ -10,6 +10,9 @@ namespace FinanceTracker.API.DTOs
         public decimal Amount { get; set; }
 
         [Required]
+        public string Currency { get; set; } = "TRY";
+
+        [Required]
         public bool IsIncome { get; set; }
 
         public string? Note { get; set; }
@@ -21,3 +24,4 @@ namespace FinanceTracker.API.DTOs
         public int CategoryId { get; set; }
     }
 }
+

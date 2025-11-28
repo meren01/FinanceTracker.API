@@ -1,10 +1,12 @@
 ﻿using FinanceTracker.API.Data;
 using FinanceTracker.API.DTOs;
+using FinanceTracker.API.Models;
+using FinanceTracker.API.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using System.Security.Claims;
 using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 
 namespace FinanceTracker.API.Controllers
 {
@@ -22,56 +24,124 @@ namespace FinanceTracker.API.Controllers
 
         private int GetUserId() =>
             int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
-            ?? "0");
+                ?? User.FindFirstValue(JwtRegisteredClaimNames.Sub)
+                ?? "0");
 
-        // Toplam gelir, gider, bakiye
+        // ============================
+        // 1) SUMMARY (Toplam gelir/gider)
+        // ============================
         [HttpGet("summary")]
         public async Task<ActionResult<DashboardSummaryDto>> GetSummary()
         {
             var userId = GetUserId();
+
             var transactions = await _db.Transactions
                 .Where(t => t.UserId == userId)
                 .ToListAsync();
 
-            var totalIncome = transactions.Where(t => t.IsIncome).Sum(t => t.Amount);
-            var totalExpense = transactions.Where(t => !t.IsIncome).Sum(t => t.Amount);
+            decimal totalIncome = transactions
+                .Where(t => t.IsIncome)
+                .Sum(t => t.AmountInTRY);
 
-            return Ok(new DashboardSummaryDto
+            decimal totalExpense = transactions
+                .Where(t => !t.IsIncome)
+                .Sum(t => t.AmountInTRY);
+
+            var dto = new DashboardSummaryDto
             {
                 TotalIncome = totalIncome,
                 TotalExpense = totalExpense,
-                Balance = totalIncome - totalExpense
-            });
+                Balance = totalIncome - totalExpense,
+                Currency = "TRY"
+            };
+
+            return Ok(dto);
         }
 
-        // Kategori bazlı gelir/gider
+        // ============================
+        // 2) CATEGORY SUMMARY (Kategoriler bazlı gelir/gider)
+        // ============================
         [HttpGet("category-summary")]
         public async Task<ActionResult<DashboardCategorySummaryDto>> GetCategorySummary()
         {
             var userId = GetUserId();
+
             var transactions = await _db.Transactions
                 .Where(t => t.UserId == userId)
                 .Include(t => t.Category)
                 .ToListAsync();
 
-            var incomeSummary = transactions
+            var incomeList = transactions
                 .Where(t => t.IsIncome)
-                .GroupBy(t => t.Category?.Name ?? "Bilinmeyen")
-                .Select(g => new CategoryTotalDto { CategoryName = g.Key, Total = g.Sum(t => t.Amount) })
+                .GroupBy(t => t.Category.Name)
+                .Select(g => new CategoryTotalDto
+                {
+                    CategoryName = g.Key,
+                    Total = g.Sum(x => x.AmountInTRY)
+                })
                 .ToList();
 
-            var expenseSummary = transactions
+            var expenseList = transactions
                 .Where(t => !t.IsIncome)
-                .GroupBy(t => t.Category?.Name ?? "Bilinmeyen")
-                .Select(g => new CategoryTotalDto { CategoryName = g.Key, Total = g.Sum(t => t.Amount) })
+                .GroupBy(t => t.Category.Name)
+                .Select(g => new CategoryTotalDto
+                {
+                    CategoryName = g.Key,
+                    Total = g.Sum(x => x.AmountInTRY)
+                })
                 .ToList();
 
-            return Ok(new DashboardCategorySummaryDto
+            var dto = new DashboardCategorySummaryDto
             {
-                Income = incomeSummary,
-                Expense = expenseSummary
-            });
+                Income = incomeList,
+                Expense = expenseList,
+                Currency = "TRY"
+            };
+
+            return Ok(dto);
+        }
+
+        // ======================================
+        // 3) MONTHLY (Linechart / histogram için)
+        // ======================================
+        [HttpGet("monthly")]
+        public async Task<IActionResult> GetMonthly()
+        {
+            var userId = GetUserId();
+
+            var transactions = await _db.Transactions
+                .Where(t => t.UserId == userId)
+                .ToListAsync();
+
+            var result = new List<object>();
+
+            var grouped = transactions
+                .GroupBy(t => new { t.Date.Year, t.Date.Month })
+                .OrderBy(g => g.Key.Year)
+                .ThenBy(g => g.Key.Month);
+
+            foreach (var g in grouped)
+            {
+                result.Add(new
+                {
+                    Month = $"{g.Key.Month:D2}/{g.Key.Year}",
+                    Income = g.Where(x => x.IsIncome).Sum(x => x.AmountInTRY),
+                    Expense = g.Where(x => !x.IsIncome).Sum(x => x.AmountInTRY)
+                });
+            }
+
+            return Ok(result);
+        }
+
+        // ============================
+        // 4) TEST endpoint (isteğe bağlı)
+        // ============================
+        [AllowAnonymous]
+        [HttpGet("test")]
+        public IActionResult Test()
+        {
+            return Ok(new { message = "Dashboard API çalışıyor" });
         }
     }
 }
+

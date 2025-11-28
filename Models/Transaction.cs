@@ -1,32 +1,33 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
+﻿using FinanceTracker.API.Models;
+using System.ComponentModel.DataAnnotations;
 
-namespace FinanceTracker.API.Models
+public class Transaction
 {
-    public class Transaction
-    {
-        [Key]
-        public int Id { get; set; }
+    [Key]
+    public int Id { get; set; }
 
-        [Required]
-        public decimal Amount { get; set; }
+    [Required]
+    public decimal Amount { get; set; }
 
-        [Required]
-        public bool IsIncome { get; set; } // true => income, false => expense
+    [Required]
+    public string Currency { get; set; } = "TRY";
 
-        public string? Note { get; set; }
+    [Required]
+    public decimal AmountInTRY { get; set; }
 
-        [Required]
-        public DateTime Date { get; set; } = DateTime.UtcNow;
+    [Required]
+    public bool IsIncome { get; set; }
 
-        // Category relation
-        [Required]
-        public int CategoryId { get; set; }
-        public Category? Category { get; set; }
+    public string? Note { get; set; }
 
-        // Owner reference for easy filtering
-        [Required]
-        public int UserId { get; set; }
-        public User? User { get; set; }
-    }
+    [Required]
+    public DateTime Date { get; set; } = DateTime.UtcNow;
+
+    [Required]
+    public int CategoryId { get; set; }
+    public Category? Category { get; set; }
+
+    [Required]
+    public int UserId { get; set; }
+    public User? User { get; set; }
 }

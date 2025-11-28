@@ -4,5 +4,7 @@
     {
         public List<CategoryTotalDto> Income { get; set; } = new();
         public List<CategoryTotalDto> Expense { get; set; } = new();
+
+        public string Currency { get; set; } = "TRY";
     }
 }
